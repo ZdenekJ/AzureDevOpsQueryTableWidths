@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         LocalStorage Test s URL klíči - Krok 6
+// @name         LocalStorage Test s URL klíči - Krok 9
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.9.0
 // @description  Test LocalStorage s URL-based klíči a nastavování šířek sloupců
 // @author       You
 // @match        https://sportisimo.visualstudio.com/*
@@ -397,15 +397,33 @@
   /**
    * Aktivuje Table Observer pro sledování změn šířek sloupců
    * Sleduje konkrétní colgroup element
+   * @param {HTMLElement} colgroup - Colgroup element ke sledování
    */
-  function activateTableObserver() {
+  function activateTableObserver(colgroup) {
     console.log("🚀 Aktivace Table Observer...");
 
-    // TODO: Implementovat vytvoření Table Observer
-    // TODO: Nastavit sledování změn width atributů u col elementů
+    if (!colgroup) {
+      console.error(
+        "❌ Nelze aktivovat Table Observer - chybí colgroup element"
+      );
+      return false;
+    }
+
+    // Vytvoříme nový Table Observer
+    tableObserver = new MutationObserver(handleTableMutations);
+
+    // Sledujeme změny atributů (hlavně style) u všech col elementů v colgroup
+    tableObserver.observe(colgroup, {
+      childList: false, // Nesledujeme přidávání/odebírání col elementů
+      subtree: true, // Sledujeme i vnořené elementy (col elementy)
+      attributes: true, // Sledujeme změny atributů
+      attributeFilter: ["style", "width"], // Pouze style a width atributy
+      attributeOldValue: true, // Chceme i staré hodnoty pro porovnání
+    });
 
     isTableObserverActive = true;
-    console.log("✅ Table Observer aktivován");
+    console.log("✅ Table Observer aktivován pro colgroup:", colgroup);
+    return true;
   }
 
   /**
@@ -415,8 +433,7 @@
     console.log("🛑 Deaktivace Table Observer...");
 
     if (tableObserver) {
-      // TODO: Implementovat disconnect() na table observer
-      // tableObserver.disconnect();
+      tableObserver.disconnect();
       tableObserver = null;
       console.log("   Table Observer byl odstraněn");
     }
@@ -481,12 +498,44 @@
   function handleTableDiscovered(colgroup) {
     console.log("🎉 Objevena tabulka s colgroup!");
     console.log("📊 Colgroup element:", colgroup);
-    console.log("💾 Zde by se měly nastavit uložené šířky sloupců");
-    console.log("👀 Zde by se měl spustit Table Observer pro sledování změn");
 
-    // TODO: Načíst a aplikovat uložené šířky sloupců
-    // TODO: Aktivovat Table Observer na tento colgroup
+    // Načteme a aplikujeme uložené šířky sloupců
+    loadAndApplyStoredWidths(colgroup);
+
+    // Aktivujeme Table Observer na tento colgroup
+    activateTableObserver(colgroup);
   }
+
+  /**
+   * Načte uložené šířky sloupců a aplikuje je na tabulku
+   * @param {Element} colgroup - Colgroup element
+   */
+  function loadAndApplyStoredWidths(colgroup) {
+    console.log("🔍 Načítám uložené šířky sloupců...");
+
+    const existingData = loadCurrentPageData();
+    if (
+      existingData &&
+      existingData.columns_width &&
+      existingData.columns_width.length > 0
+    ) {
+      console.log("� Nalezena uložená data:", existingData);
+      console.log("🎯 Aplikuji uložené šířky:", existingData.columns_width);
+
+      const success = setColumnWidths(colgroup, existingData.columns_width);
+      if (success) {
+        console.log("✅ Uložené šířky sloupců byly úspěšně aplikovány");
+      } else {
+        console.error("❌ Nepodařilo se aplikovat uložené šířky sloupců");
+      }
+    } else {
+      console.log("⚠️ Žádná uložená data pro tuto stránku nebyla nalezena");
+    }
+  }
+
+  // Proměnné pro debouncing ukládání
+  let saveTimeoutId = null;
+  const SAVE_DELAY = 500; // ms - čekání před uložením po poslední změně
 
   /**
    * Callback funkce volaná při detekci změn šířek sloupců
@@ -499,12 +548,95 @@
       "mutací"
     );
 
-    // TODO: Implementovat zpracování změn
-    // TODO: Filtrovat pouze změny width atributů u col elementů
-    // TODO: Implementovat debouncing pro zabránění příliš častému ukládání
-    // TODO: Zavolat funkci pro uložení aktuálních šířek
+    // Filtrujeme pouze změny, které se týkají šířek sloupců
+    let hasWidthChange = false;
 
-    console.log("💾 Ukládání změn šířek sloupců...");
+    mutations.forEach((mutation) => {
+      if (mutation.type === "attributes") {
+        const target = mutation.target;
+
+        // Kontrolujeme pouze col elementy
+        if (target.tagName.toLowerCase() === "col") {
+          const attributeName = mutation.attributeName;
+
+          if (attributeName === "style" || attributeName === "width") {
+            console.log(`📏 Změna ${attributeName} u col elementu:`, target);
+
+            // Zkontrolujeme, jestli se opravdu změnila šířka
+            const oldValue = mutation.oldValue || "";
+            const newValue =
+              attributeName === "style"
+                ? target.getAttribute("style") || ""
+                : target.getAttribute("width") || "";
+
+            if (oldValue !== newValue) {
+              console.log(`   Stará hodnota: "${oldValue}"`);
+              console.log(`   Nová hodnota: "${newValue}"`);
+              hasWidthChange = true;
+            }
+          }
+        }
+      }
+    });
+
+    // Pokud byla detekována změna šířky, naplánujeme uložení s debouncingem
+    if (hasWidthChange) {
+      console.log("💾 Naplánováno uložení změn šířek sloupců...");
+      debouncedSaveColumnWidths();
+    }
+  }
+
+  /**
+   * Uloží aktuální šířky sloupců s debouncingem
+   * Zabrání příliš častému ukládání při rychlých změnách
+   */
+  function debouncedSaveColumnWidths() {
+    // Zrušíme předchozí timeout, pokud existuje
+    if (saveTimeoutId) {
+      clearTimeout(saveTimeoutId);
+    }
+
+    // Nastavíme nový timeout pro uložení
+    saveTimeoutId = setTimeout(() => {
+      saveCurrentTableWidths();
+      saveTimeoutId = null;
+    }, SAVE_DELAY);
+  }
+
+  /**
+   * Uloží aktuální šířky sloupců tabulky do LocalStorage
+   */
+  function saveCurrentTableWidths() {
+    console.log("💾 Ukládání aktuálních šířek sloupců...");
+
+    const tableData = getTableWidths();
+    if (!tableData) {
+      console.error("❌ Nepodařilo se získat data tabulky pro uložení");
+      return false;
+    }
+
+    const key = generateStorageKey();
+    const dataToSave = createTableData(tableData.widths);
+
+    // Přidáme extra info pro debugování
+    const enrichedData = {
+      ...dataToSave,
+      url: window.location.href,
+      pathname: window.location.pathname,
+      columnCount: tableData.columnCount,
+      savedAt: new Date().toLocaleString("cs-CZ"),
+    };
+
+    const success = saveToStorage(key, enrichedData);
+
+    if (success) {
+      console.log("✅ Šířky sloupců byly úspěšně uloženy");
+      console.log("📊 Uložené šířky:", tableData.widths);
+    } else {
+      console.error("❌ Nepodařilo se uložit šířky sloupců");
+    }
+
+    return success;
   }
 
   /**
@@ -614,6 +746,8 @@
   window.setColumnWidths = setColumnWidths;
   window.getTableWidths = getTableWidths;
   window.setTableWidths = setTableWidths;
+  window.saveCurrentTableWidths = saveCurrentTableWidths;
+  window.loadAndApplyStoredWidths = loadAndApplyStoredWidths;
 
   // Spustit inicializaci
   initialize();
