@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         LocalStorage Test s URL klíči - Krok 9
+// @name         Azure Devops - Obsluha šířky sloupců výsledků query - LocalStorage Test s URL klíči - Krok 9
 // @namespace    http://tampermonkey.net/
 // @version      0.9.0
 // @description  Test LocalStorage s URL-based klíči a nastavování šířek sloupců
