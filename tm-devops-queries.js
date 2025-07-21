@@ -2,8 +2,8 @@
 // @name         Azure Devops - Obsluha šířky sloupců výsledků query
 // @namespace    http://tampermonkey.net/
 // @version      1.0.0
-// @description  Test LocalStorage s URL-based klíči a nastavování šířek sloupců
-// @author       zdenek.jasek@.com
+// @description  Nastavování šířek sloupců pro query vysledky
+// @author       zdenek.jasek@gmail.com
 // @match        https://sportisimo.visualstudio.com/*
 // @grant        none
 // ==/UserScript==
